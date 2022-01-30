@@ -15,17 +15,6 @@
 #define YEL "\e[0;33m"
 #define RST "\e[0m"
 
-#define L 5u
-#define N_VALID 2315u
-#define N_WORDS 12972u
-
-#define N_THREADS 8u
-
-#define ALL_26 0x03FFFFFF
-
-uint32_t MASKS[255] = {};
-#define MASK(c) (uint32_t)(1 << (c - 'a'))
-
 enum Results {
   BLACK = 0,
   YELLOW = 1,
@@ -33,6 +22,16 @@ enum Results {
 };
 
 static const char *COLOR[3] = {BLK, YEL, GRN};
+
+#define L 5u
+#define N_VALID 2315u
+#define N_WORDS 12972u
+#define N_THREADS 8u
+#define ALL_26 0x03FFFFFF
+
+#define MASK(c) (uint32_t)(1 << (c - 'a'))
+static uint32_t MASKS[255];
+#define GET_MASK(c) MASKS[(uint8_t)c]
 
 static char *map(const std::string &file) {
   int fd = open(file.c_str(), O_RDONLY);
@@ -79,17 +78,21 @@ struct State {
   void apply(const Results result[L], const char *guess) {
     uint32_t temp = 0;
     for (uint8_t i = 0; i < L; ++i) {
-      const uint32_t m = MASKS[guess[i]];
+      const uint32_t m = GET_MASK(guess[i]);
       if (result[i] == GREEN) // Must be this value.
         valid[i] = m;
       else if (result[i] == YELLOW) { // This position cannot be this value.
         valid[i] &= ~m;
         include |= m; // But this value must be elsewhere
-        temp |= m;
-      } else if (not(temp & m))
-        for (uint8_t j = 0; j < L; ++j) // No position can be this value.
-          if (valid[j] - m)
-            valid[j] &= ~m;
+        temp |= m;    // Keep track of prior yellow, as,
+      } else {
+        if (not(temp & m)) {              // If yellow of this letter not seen,
+          for (uint8_t j = 0; j < L; ++j) // No position can be this value.
+            if (valid[j] - m)
+              valid[j] &= ~m;
+        } else // Else just this position is not this letter
+          valid[i] &= ~m;
+      }
     }
   }
 
@@ -108,33 +111,30 @@ struct State {
 
   bool is_valid(const char *word) const {
     bool r = true;
-
     uint32_t required = include;
     for (uint8_t i = 0; i < L and r; ++i) {
-      const uint32_t m = MASKS[word[i]];
-      required -= required & m;
+      const uint32_t m = GET_MASK(word[i]);
       r &= (bool)(valid[i] & m);
+      required -= required & m;
     }
 
     return r and not required;
   }
 
-  void valid_words() {
+  void valid_sets() {
     uint16_t j = 0;
     for (uint16_t i = 0; i < words.size(); ++i)
       if (is_valid(get_word(words[i])))
         words[j++] = words[i];
 
     words.resize(j);
-  }
 
-  void valid_answers() {
-    uint16_t j = 0;
+    uint16_t k = 0;
     for (uint16_t i = 0; i < answers.size(); ++i)
       if (is_valid(get_word(answers[i])))
-        answers[j++] = answers[i];
+        answers[k++] = answers[i];
 
-    answers.resize(j);
+    answers.resize(k);
   }
 };
 
@@ -143,21 +143,19 @@ bool play(Results result[L], const char *guess, const char *hidden) {
   bool done[5];
 
   for (uint8_t i = 0; i < L; ++i) {
-    done[i] = guess[i] == hidden[i];
-    r &= done[i];
+    r &= (done[i] = guess[i] == hidden[i]);
     result[i] = (done[i]) ? GREEN : BLACK;
   }
 
   if (not r) {
     for (uint8_t i = 0; i < L; ++i) {
-      if (result[i] == GREEN)
-        continue;
-
-      for (uint8_t j = 0; j < L; ++j) {
-        if (i != j and guess[i] == hidden[j] and not done[j]) {
-          done[j] = true;
-          result[i] = YELLOW;
-          break;
+      if (result[i] != GREEN) {
+        for (uint8_t j = 0; j < L; ++j) {
+          if (guess[i] == hidden[j] and not done[j] and i != j) {
+            done[j] = true;
+            result[i] = YELLOW;
+            break;
+          }
         }
       }
     }
@@ -166,26 +164,28 @@ bool play(Results result[L], const char *guess, const char *hidden) {
   return r;
 }
 
-void print_move(Results result[L], const char *guess, const char *hidden) {
+void print_move(Results result[L], const char *guess,
+                const char *hidden = nullptr) {
   for (uint8_t i = 0; i < L; ++i)
     std::cout << COLOR[result[i]] << guess[i] << RST;
-  std::cout << " / ";
-  for (uint8_t i = 0; i < L; ++i)
-    std::cout << hidden[i];
+  if (hidden) {
+    std::cout << " / ";
+    for (uint8_t i = 0; i < L; ++i)
+      std::cout << hidden[i];
+  }
 }
 
-uint32_t result_to_score(const Results result[L], const char *guess,
-                         const State &state) {
-  return result[0] + result[1] + result[2] + result[3] + result[4];
-}
-
-// uint32_t result_to_score(const Results result[L], const char *guess,
-//                          const State &state) {
-//   State copy = state;
-//   copy.apply(result, guess);
-//   copy.valid_words();
-//   return N_WORDS - copy.words.size();
+// uint32_t result_to_score(const Results result[L]) {
+//     return result[0] + result[1] + result[2] + result[3] + result[4];
 // }
+
+uint32_t result_to_score(const Results result[L]) {
+  uint32_t score = 1;
+  for (uint8_t i = 0; i < L; ++i)
+    score *= (result[i] + 1);
+
+  return score;
+}
 
 class StateHash {
 public:
@@ -224,8 +224,10 @@ const char *guess_brute(const State &state) {
 
         for (uint16_t j = 0; j < state.answers.size(); ++j) {
           play(result, guess, get_valid_word(state.answers[j]));
-          score += result_to_score(result, guess, state);
+          score += result_to_score(result);
         }
+
+        score /= (uint32_t)state.answers.size();
 
         if (score > best_score[id]) {
           best_score[id] = score;
@@ -247,17 +249,7 @@ const char *guess_brute(const State &state) {
   return get_word(best_word[0]);
 }
 
-const char *guess_minmax(const State &state) {
-  struct Value {
-    uint32_t max;
-    uint32_t min;
-    uint32_t avg;
-  };
-
-  return nullptr;
-}
-
-double evaluate(const char *(*guesser)(const State &state)) {
+double evaluate(const char *(*guesser)(const State &state), bool verbose) {
   double avg = 0;
 
   Results result[L];
@@ -268,12 +260,21 @@ double evaluate(const char *(*guesser)(const State &state)) {
     int j = 0;
     bool r = true;
     for (; j < 6 and r; ++j) {
-      const char *guess = guess_brute(state);
+      const char *guess = guesser(state);
       r = not play(result, guess, hidden);
+      if (verbose) {
+        print_move(result, guess);
+        std::cout << " ";
+      }
+
       state.apply(result, guess);
-      state.valid_words();
-      state.valid_answers();
+      state.valid_sets();
     }
+
+    j += r;
+
+    if (verbose)
+      std::cout << j << std::endl;
 
     avg += j;
   }
@@ -281,34 +282,39 @@ double evaluate(const char *(*guesser)(const State &state)) {
   return avg / N_VALID;
 }
 
+void random_examples(const char *hidden) {
+  State state;
+  Results result[L];
+
+  bool r = true;
+  for (int i = 0; i < 6 and r; ++i) {
+    const char *guess = guess_brute(state);
+    r = not play(result, guess, hidden);
+
+    print_move(result, guess, hidden);
+    std::cout << std::endl;
+
+    state.apply(result, guess);
+    state.print();
+    state.valid_sets();
+
+    std::cout << "Press Enter" << std::endl;
+    std::cin.ignore();
+  }
+}
+
 int main(int argc, char **argv) {
+  // Initialize mask cache
   for (char c = 'a'; c <= 'z'; ++c)
-    MASKS[c] = MASK(c);
+    GET_MASK(c) = MASK(c);
 
-  double avg = evaluate(guess_brute);
-  std::cout << avg << std::endl;
+  if (argc == 2)
+    random_examples(argv[1]);
 
-  // for (;;) {
-  //   State state;
-  //   Results result[L];
-  //   const char *hidden = get_valid_word(rand() % N_VALID);
-
-  //   bool r = true;
-  //   for (int i = 0; i < 6 and r; ++i) {
-  //     const char *guess = guess_brute(state);
-  //     r = not play(result, guess, hidden);
-
-  //     print_move(result, guess, hidden);
-  //     std::cout << std::endl;
-
-  //     state.apply(result, guess);
-  //     state.print();
-  //     state.valid_words();
-  //     state.valid_answers();
-
-  //     std::cin.ignore();
-  //   }
-  // }
+  else {
+    double avg = evaluate(guess_brute, true);
+    std::cout << "Average Guesses: " << avg << std::endl;
+  }
 
   return 0;
 }
