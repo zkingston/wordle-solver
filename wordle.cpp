@@ -1,4 +1,3 @@
-#include <errno.h>
 #include <fcntl.h>
 #include <iostream>
 #include <numeric>
@@ -10,29 +9,38 @@
 #include <unordered_map>
 #include <vector>
 
+// color codes
 #define BLK "\e[0;30m"
 #define GRN "\e[0;32m"
 #define YEL "\e[0;33m"
 #define RST "\e[0m"
 
+// possible wordle answers
 enum Results {
   BLACK = 0,
   YELLOW = 1,
   GREEN = 2,
 };
 
+// result to color code
 static const char *COLOR[3] = {BLK, YEL, GRN};
 
-#define L 5u
-#define N_VALID 2315u
-#define N_WORDS 12972u
-#define N_THREADS 8u
-#define ALL_26 0x03FFFFFF
+#define L 5u              // number of letters
+#define N_VALID 2315u     // number of valid answers
+#define N_WORDS 12972u    // number of valid guesses
+#define N_THREADS 8u      // number of threads to use
+#define ALL_26 0x03FFFFFF // bitmask for 26
 
+// get bitmask for char
 #define MASK(c) (uint32_t)(1 << (c - 'a'))
+
+// cached masks for each character
 static uint32_t MASKS[255];
+
+// get the mask from the cache
 #define GET_MASK(c) MASKS[(uint8_t)c]
 
+// memory map a file
 static char *map(const std::string &file) {
   int fd = open(file.c_str(), O_RDONLY);
 
@@ -42,18 +50,25 @@ static char *map(const std::string &file) {
   return (char *)mmap(0, s.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
 }
 
-static char *VALID_WORDS = map("../words_hidden");
-static char *WORDS = map("../words_all");
+static char *VALID_WORDS = map("../words_hidden"); // valid answers
+static char *WORDS = map("../words_all");          // valid guesses
 
+// get the answer at index idx
 const char *get_valid_word(uint16_t idx) { return &VALID_WORDS[6 * idx]; }
+
+// get the guess at index idx
 const char *get_word(uint16_t idx) { return &WORDS[6 * idx]; }
 
+// state which encodes known information
+// uses bitmasks to encode letter information - e.g., bit #3 corresponds to `c`
 struct State {
+  // bitmasks for valid characters at each position
   uint32_t valid[L] = {ALL_26, ALL_26, ALL_26, ALL_26, ALL_26};
+  // letters that must be in the word
   uint32_t include = 0;
 
-  std::vector<uint16_t> words;
-  std::vector<uint16_t> answers;
+  std::vector<uint16_t> words;   // set of valid guesses given state
+  std::vector<uint16_t> answers; // set of valid answers given state
 
   State() {
     words.resize(N_WORDS);
@@ -79,18 +94,18 @@ struct State {
     uint32_t temp = 0;
     for (uint8_t i = 0; i < L; ++i) {
       const uint32_t m = GET_MASK(guess[i]);
-      if (result[i] == GREEN) // Must be this value.
+      if (result[i] == GREEN) // must be this value
         valid[i] = m;
-      else if (result[i] == YELLOW) { // This position cannot be this value.
+      else if (result[i] == YELLOW) { // this position cannot be this value
         valid[i] &= ~m;
-        include |= m; // But this value must be elsewhere
-        temp |= m;    // Keep track of prior yellow, as,
+        include |= m; // but this value must be elsewhere
+        temp |= m;    // keep track of prior yellow, as,
       } else {
-        if (not(temp & m)) {              // If yellow of this letter not seen,
-          for (uint8_t j = 0; j < L; ++j) // No position can be this value.
+        if (not(temp & m)) {              // if yellow of this letter not seen,
+          for (uint8_t j = 0; j < L; ++j) // no position can be this value
             if (valid[j] - m)
               valid[j] &= ~m;
-        } else // Else just this position is not this letter
+        } else // else just this position is not this letter
           valid[i] &= ~m;
       }
     }
@@ -128,7 +143,9 @@ struct State {
         words[j++] = words[i];
 
     words.resize(j);
+  }
 
+  void valid_answers() {
     uint16_t k = 0;
     for (uint16_t i = 0; i < answers.size(); ++i)
       if (is_valid(get_word(answers[i])))
@@ -269,6 +286,7 @@ double evaluate(const char *(*guesser)(const State &state), bool verbose) {
 
       state.apply(result, guess);
       state.valid_sets();
+      state.valid_answers();
     }
 
     j += r;
@@ -297,6 +315,7 @@ void random_examples(const char *hidden) {
     state.apply(result, guess);
     state.print();
     state.valid_sets();
+    state.valid_answers();
 
     std::cout << "Press Enter" << std::endl;
     std::cin.ignore();
