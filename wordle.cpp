@@ -291,8 +291,10 @@ double evaluate(const char *(*guesser)(const State &state), bool verbose) {
 
     j += r;
 
-    if (verbose)
+    if (verbose and not r)
       std::cout << j << std::endl;
+    else if (verbose)
+      printf("%.5s\n", hidden);
 
     avg += j;
   }
