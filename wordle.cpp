@@ -30,7 +30,7 @@ static const char *COLOR[3] = {BLK, YEL, GRN};
 #define L 5u               // number of letters
 #define N_VALID 2315u      // number of valid answers
 #define N_WORDS 12972u     // number of valid guesses
-#define N_THREADS 8u       // number of threads to use
+#define N_THREADS 4u       // number of threads to use
 #define ALL_26 0x03FFFFFF  // bitmask for 26
 
 static uint32_t MASKS[255];                 // cached masks for each character
@@ -272,64 +272,9 @@ const char *guess_random(const State &state)
     return get_word(state.words[rand() % state.words.size()]);
 }
 
-const char *guess_brute(const State &state)
-{
-    uint16_t rw;
-    if (get_cache(state, &rw, nullptr, 0))
-        return get_word(rw);
-
-    const uint8_t n = (state.words.size() > 100) ? N_THREADS : 1;
-    const uint16_t block = (uint16_t)(state.words.size() / n);
-
-    uint32_t best_score[n] = {};
-    uint16_t best_word[n];
-
-    std::thread threads[n];
-    for (uint8_t id = 0; id < n; ++id)
-        threads[id] = std::thread([&, id]() mutable {
-            Results result[L];
-
-            for (uint16_t i = (uint16_t)(block * id); i < block; ++i)
-            {
-                uint32_t score = 0;
-                const char *guess = get_word(state.words[i]);
-
-                for (uint16_t j = 0; j < state.answers.size(); ++j)
-                {
-                    play(result, guess, get_valid_word(state.answers[j]));
-                    score += result_to_score(result);
-                }
-
-                score /= (uint32_t)state.answers.size();
-
-                if (score > best_score[id])
-                {
-                    best_score[id] = score;
-                    best_word[id] = state.words[i];
-                }
-            }
-        });
-
-    for (auto &thread : threads)
-        thread.join();
-
-    for (uint8_t i = 1; i < n; ++i)
-        if (best_score[i] > best_score[0])
-        {
-            best_score[0] = best_score[i];
-            best_word[0] = best_word[i];
-        }
-
-    add_cache(state, best_word[0], best_score[0], 0);
-    return get_word(best_word[0]);
-}
-
 uint32_t recurse_answer(const State &, uint16_t, uint8_t);
 uint32_t recurse_words(const Results result[L], uint16_t word, const State &base, uint8_t depth)
 {
-    if (not depth)
-        return result_to_score(result);
-
     State state = base;
     state.apply(result, get_word(word));
 
@@ -337,8 +282,11 @@ uint32_t recurse_words(const Results result[L], uint16_t word, const State &base
     if (get_cache(state, nullptr, &score, depth))
         return score;
 
-    state.valid_sets();
     state.valid_answers();
+    if (not depth)
+        return N_VALID - state.answers.size();
+
+    // state.valid_sets();
 
     for (uint16_t i = 0; i < state.words.size(); ++i)
         score += recurse_answer(state, state.words[i], depth);
@@ -370,6 +318,9 @@ const char *guess_brute_recursive(const State &state)
     uint16_t rw;
     if (get_cache(state, &rw, nullptr, 0))
         return get_word(rw);
+
+    if (state.answers.size() == 1)
+        return get_word(state.answers[0]);
 
     const uint8_t n = (state.words.size() > N_THREADS) ? N_THREADS : 1;
     const uint16_t block = (uint16_t)(state.words.size() / n);
@@ -420,6 +371,7 @@ double evaluate(const char *(*guesser)(const State &state), bool verbose)
         bool r = true;
         for (; j < 6 and r; ++j)
         {
+            // const char *guess = (j == 0) ? "roate" : guesser(state);
             const char *guess = guesser(state);
             r = not play(result, guess, hidden);
             if (verbose)
@@ -429,7 +381,7 @@ double evaluate(const char *(*guesser)(const State &state), bool verbose)
             }
 
             state.apply(result, guess);
-            state.valid_sets();
+            // state.valid_sets();
             state.valid_answers();
         }
 
@@ -454,7 +406,7 @@ void random_examples(const char *hidden)
     bool r = true;
     for (int i = 0; i < 6 and r; ++i)
     {
-        const char *guess = guess_brute_recursive(state);
+        const char *guess = (i == 0) ? "roate" : guess_brute_recursive(state);
         r = not play(result, guess, hidden);
 
         print_move(result, guess, hidden);
@@ -462,7 +414,7 @@ void random_examples(const char *hidden)
 
         state.apply(result, guess);
         state.print();
-        state.valid_sets();
+        // state.valid_sets();
         state.valid_answers();
 
         std::cout << "Press Enter" << std::endl;
