@@ -425,8 +425,8 @@ void random_examples(const char *hidden)
 int main(int argc, char **argv)
 {
     // Iniitalize word files
-    VALID_WORDS = map("../words_hidden");
-    WORDS = map("../words_all");
+    VALID_WORDS = map("words_hidden");
+    WORDS = map("words_all");
 
     // Initialize mask cache
     for (char c = 'a'; c <= 'z'; ++c)

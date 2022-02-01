@@ -5,9 +5,7 @@ Automatic solver for Wordle.
 ## Compiling
 Simply compile with CMake:
 ```sh
-mkdir build
-cd build
-cmake ..
+cmake .
 make
 ```
 
