@@ -1,6 +1,5 @@
 #include <fcntl.h>
 #include <iostream>
-#include <mutex>
 #include <numeric>
 #include <stdio.h>
 #include <string.h>
@@ -30,7 +29,7 @@ static const char *COLOR[3] = {BLK, YEL, GRN};
 #define L 5u               // number of letters
 #define N_VALID 2315u      // number of valid answers
 #define N_WORDS 12972u     // number of valid guesses
-#define N_THREADS 4u       // number of threads to use
+#define N_THREADS 8u       // number of threads to use
 #define ALL_26 0x03FFFFFF  // bitmask for 26
 
 static uint32_t MASKS[255];                 // cached masks for each character
@@ -215,19 +214,6 @@ void print_move(Results result[L], const char *guess, const char *hidden = nullp
     std::cout << RST;
 }
 
-// uint32_t result_to_score(const Results result[L]) {
-//     return result[0] + result[1] + result[2] + result[3] + result[4];
-// }
-
-uint32_t result_to_score(const Results result[L])
-{
-    uint32_t score = 1;
-    for (uint8_t i = 0; i < L; ++i)
-        score *= (result[i] + 1);
-
-    return score;
-}
-
 class StateHash
 {
 public:
@@ -240,101 +226,46 @@ public:
     }
 };
 
-static std::mutex cache_lock;
-static std::unordered_map<const State, std::pair<uint16_t, uint32_t>, StateHash> guess_cache[3];
-
-bool get_cache(const State &state, uint16_t *word, uint32_t *score, uint8_t level)
+const char *find_guess(const State &state)
 {
-    std::unique_lock<std::mutex> lock(cache_lock);
-    const auto &it = guess_cache[level].find(state);
-    if (it != guess_cache[level].end())
-    {
-        if (word)
-            *word = it->second.first;
-        if (score)
-            *score = it->second.second;
-        return true;
-    }
+    // lookup result from cache if the best play for this state was already computed
+    static std::unordered_map<const State, uint16_t, StateHash> guess_cache;
+    const auto &it = guess_cache.find(state);
+    if (it != guess_cache.end())
+        return get_word(it->second);
 
-    return false;
-}
-
-void add_cache(const State &state, uint16_t word, uint32_t score, uint8_t level)
-{
-    std::unique_lock<std::mutex> lock(cache_lock);
-    guess_cache[level].emplace(std::piecewise_construct,      //
-                               std::forward_as_tuple(state),  //
-                               std::forward_as_tuple(word, score));
-}
-
-const char *guess_random(const State &state)
-{
-    return get_word(state.words[rand() % state.words.size()]);
-}
-
-uint32_t recurse_answer(const State &, uint16_t, uint8_t);
-uint32_t recurse_words(const Results result[L], uint16_t word, const State &base, uint8_t depth)
-{
-    State state = base;
-    state.apply(result, get_word(word));
-
-    uint32_t score = 0;
-    if (get_cache(state, nullptr, &score, depth))
-        return score;
-
-    state.valid_answers();
-    if (not depth)
-        return N_VALID - state.answers.size();
-
-    // state.valid_sets();
-
-    for (uint16_t i = 0; i < state.words.size(); ++i)
-        score += recurse_answer(state, state.words[i], depth);
-
-    score /= (uint32_t)state.words.size();
-    add_cache(state, word, score, depth);
-
-    return score;
-}
-
-uint32_t recurse_answer(const State &state, uint16_t word, uint8_t depth)
-{
-    Results result[L];
-
-    uint32_t score = 0;
-    const char *guess = get_word(word);
-    for (uint16_t j = 0; j < state.answers.size(); ++j)
-    {
-        play(result, guess, get_valid_word(state.answers[j]));
-        score += recurse_words(result, word, state, (uint8_t)(depth - 1u));
-    }
-
-    score /= (uint32_t)state.answers.size();
-    return score;
-}
-
-const char *guess_brute_recursive(const State &state)
-{
-    uint16_t rw;
-    if (get_cache(state, &rw, nullptr, 0))
-        return get_word(rw);
-
-    if (state.answers.size() == 1)
+    if (state.answers.size() == 1)  // only one word left
         return get_word(state.answers[0]);
 
     const uint8_t n = (state.words.size() > N_THREADS) ? N_THREADS : 1;
     const uint16_t block = (uint16_t)(state.words.size() / n);
 
-    uint32_t best_score[n] = {};
+    float best_score[n] = {};
     uint16_t best_word[n];
 
     std::thread threads[n];
     for (uint8_t id = 0; id < n; ++id)
         threads[id] = std::thread([&, id]() {
             const uint16_t start = (uint16_t)(block * id);
-            for (uint16_t i = start; i < start + block; ++i)
+            const uint16_t end = (uint16_t)(start + block + ((id == n - 1) ? state.words.size() % n : 0));
+            for (uint16_t i = start; i < end; ++i)
             {
-                const uint32_t score = recurse_answer(state, state.words[i], 1);
+                float score = 0;
+                const char *guess = get_word(state.words[i]);
+                for (const auto &answer : state.answers)
+                {
+                    Results result[L];
+                    play(result, guess, get_valid_word(answer));
+
+                    State next = state;
+                    next.apply(result, guess);
+                    next.valid_answers();
+
+                    score += (float)(state.answers.size() - next.answers.size());
+                }
+
+                score /= (float)state.answers.size();
+
                 if (score > best_score[id])
                 {
                     best_score[id] = score;
@@ -353,13 +284,13 @@ const char *guess_brute_recursive(const State &state)
             best_word[0] = best_word[i];
         }
 
-    add_cache(state, best_word[0], best_score[0], 0);
+    guess_cache.emplace(state, best_word[0]);
     return get_word(best_word[0]);
 }
 
-double evaluate(const char *(*guesser)(const State &state), bool verbose)
+float evaluate(bool verbose)
 {
-    double avg = 0;
+    float avg = 0;
 
     Results result[L];
     for (uint16_t i = 0; i < N_VALID; ++i)
@@ -371,8 +302,8 @@ double evaluate(const char *(*guesser)(const State &state), bool verbose)
         bool r = true;
         for (; j < 6 and r; ++j)
         {
-            // const char *guess = (j == 0) ? "roate" : guesser(state);
-            const char *guess = guesser(state);
+            // simple optimization as "roate" is the first word always found
+            const char *guess = (j == 0) ? "roate" : find_guess(state);
             r = not play(result, guess, hidden);
             if (verbose)
             {
@@ -381,7 +312,6 @@ double evaluate(const char *(*guesser)(const State &state), bool verbose)
             }
 
             state.apply(result, guess);
-            // state.valid_sets();
             state.valid_answers();
         }
 
@@ -392,21 +322,32 @@ double evaluate(const char *(*guesser)(const State &state), bool verbose)
         else if (verbose)
             printf("%.5s\n", hidden);
 
-        avg += j;
+        avg += (float)j;
     }
 
     return avg / N_VALID;
 }
 
-void random_examples(const char *hidden)
+void check_word(const char *hidden)
 {
     State state;
     Results result[L];
 
-    bool r = true;
-    for (int i = 0; i < 6 and r; ++i)
+    bool found = false;
+    for (uint16_t i = 0; i < N_VALID and not found; ++i)
+        found |= strncmp(hidden, get_valid_word(i), 5) == 0;
+
+    if (not found)
     {
-        const char *guess = (i == 0) ? "roate" : guess_brute_recursive(state);
+        std::cout << "Invalid word. Not in hidden list." << std::endl;
+        return;
+    }
+
+    bool r = true;
+    for (uint8_t i = 0; i < 6 and r; ++i)
+    {
+        // simple optimization as "roate" is the first word always found
+        const char *guess = (i == 0) ? "roate" : find_guess(state);
         r = not play(result, guess, hidden);
 
         print_move(result, guess, hidden);
@@ -414,12 +355,58 @@ void random_examples(const char *hidden)
 
         state.apply(result, guess);
         state.print();
-        // state.valid_sets();
         state.valid_answers();
 
         std::cout << "Press Enter" << std::endl;
         std::cin.ignore();
     }
+}
+
+void interactive()
+{
+    State state;
+    Results result[L];
+
+    std::cout << "After each guess, enter in result (string of 5 of {b,y,g}, e.g., bbygb)" << std::endl;
+
+    for (uint8_t i = 0; i < 6 and state.answers.size() > 1; ++i)
+    {
+        // simple optimization as "roate" is the first word always found
+        const char *guess = (i == 0) ? "roate" : find_guess(state);
+        printf("Guess : %.5s\nResult: ", guess);
+
+        while (true)
+        {
+            std::string result_string;
+            std::getline(std::cin, result_string);
+
+            if (result_string.size() == L)
+            {
+                uint8_t i = 0;
+                for (; i < L; ++i)
+                    if (result_string[i] == 'b')
+                        result[i] = BLACK;
+                    else if (result_string[i] == 'y')
+                        result[i] = YELLOW;
+                    else if (result_string[i] == 'g')
+                        result[i] = GREEN;
+                    else
+                        break;
+
+                if (i == L)
+                    break;
+            }
+
+            std::cout << "Invalid Result. Try again." << std::endl;
+        }
+
+        state.apply(result, guess);
+        state.valid_answers();
+        state.print();
+        std::cout << std::endl;
+    }
+
+    printf("Answer: %.5s\n", get_word(state.answers[0]));
 }
 
 int main(int argc, char **argv)
@@ -433,12 +420,15 @@ int main(int argc, char **argv)
         GET_MASK(c) = MASK(c);
 
     if (argc == 2)
-        random_examples(argv[1]);
+        if (strncmp(argv[1], "?", 1) == 0)
+            interactive();
+        else
+            check_word(argv[1]);
 
     else
     {
-        double avg = evaluate(guess_brute_recursive, true);
-        std::cout << "Average Guesses: " << avg << std::endl;
+        float r = evaluate(true);
+        std::cout << "Average Guesses: " << r << std::endl;
     }
 
     return 0;
