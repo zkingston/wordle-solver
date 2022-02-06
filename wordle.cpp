@@ -264,8 +264,6 @@ const char *find_guess(const State &state)
                     score += (float)(state.answers.size() - next.answers.size());
                 }
 
-                score /= (float)state.answers.size();
-
                 if (score > best_score[id])
                 {
                     best_score[id] = score;
