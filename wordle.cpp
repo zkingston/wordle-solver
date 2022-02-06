@@ -167,7 +167,7 @@ struct State
     {
         uint16_t k = 0;
         for (uint16_t i = 0; i < answers.size(); ++i)
-            if (is_valid(get_word(answers[i])))
+            if (is_valid(get_valid_word(answers[i])))
                 answers[k++] = answers[i];
 
         answers.resize(k);
