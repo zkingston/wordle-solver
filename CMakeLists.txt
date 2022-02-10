@@ -20,3 +20,6 @@ find_package(Threads REQUIRED)
 
 add_executable(wordle wordle.cpp)
 target_link_libraries(wordle Threads::Threads)
+
+add_executable(mathler mathler.cpp)
+target_link_libraries(mathler Threads::Threads)
