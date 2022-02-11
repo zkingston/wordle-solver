@@ -44,24 +44,14 @@ static char SYMBOLS[9] = {0, '+', '-', 0, '*', 0, 0, 0, '/'};
 struct Expression
 {
     char s[L + 1];
-    uint16_t v[3] = {0, 0, 0};
-    Symbol op[2] = {PLUS, PLUS};
 
     Expression(uint16_t a, Symbol op1, uint16_t b)
     {
-        v[0] = a;
-        v[1] = b;
-        op[0] = op1;
         snprintf(s, L + 1, "%u%c%u", a, SYMBOLS[op1], b);
     }
 
     Expression(uint16_t a, Symbol op1, uint16_t b, Symbol op2, uint16_t c)
     {
-        v[0] = a;
-        v[1] = b;
-        v[2] = c;
-        op[0] = op1;
-        op[1] = op2;
         snprintf(s, L + 1, "%u%c%u%c%u", a, SYMBOLS[op1], b, SYMBOLS[op2], c);
     }
 
@@ -326,10 +316,10 @@ void print_move(Results result[L], const char *guess, const char *hidden = nullp
     std::cout << RST;
 }
 
+static std::unordered_map<const State, uint16_t, StateHash> guess_cache;
 const char *find_guess(const State &state)
 {
     // lookup result from cache if the best play for this state was already computed
-    static std::unordered_map<const State, uint16_t, StateHash> guess_cache;
     const auto &it = guess_cache.find(state);
     if (it != guess_cache.end())
         return expressions[it->second].s;
@@ -386,7 +376,7 @@ const char *find_guess(const State &state)
     return expressions[best_word[0]].s;
 }
 
-void check_word(const char *hidden, uint32_t value)
+void check_word(const char *hidden)
 {
     State state;
     Results result[L];
@@ -409,15 +399,119 @@ void check_word(const char *hidden, uint32_t value)
     }
 }
 
+void interactive()
+{
+    State state;
+    Results result[L];
+
+    std::cout << "After each guess, enter in result (string of 5 of {b,y,g}, e.g., bbygb)" << std::endl;
+
+    for (uint8_t i = 0; i < 6 and state.answers.size() > 1; ++i)
+    {
+        const char *guess = find_guess(state);
+        printf("Guess : %.6s\nResult: ", guess);
+
+        while (true)
+        {
+            std::string result_string;
+            std::getline(std::cin, result_string);
+
+            if (result_string.size() == L)
+            {
+                uint8_t i = 0;
+                for (; i < L; ++i)
+                    if (result_string[i] == 'b')
+                        result[i] = BLACK;
+                    else if (result_string[i] == 'y')
+                        result[i] = YELLOW;
+                    else if (result_string[i] == 'g')
+                        result[i] = GREEN;
+                    else
+                        break;
+
+                if (i == L)
+                    break;
+            }
+
+            std::cout << "Invalid Result. Try again." << std::endl;
+        }
+
+        state.apply(result, guess);
+        state.valid_answers();
+        state.print();
+        std::cout << std::endl;
+    }
+
+    printf("Answer: %.6s\n", expressions[state.answers[0]].s);
+}
+
+float evaluate(bool verbose)
+{
+    const uint16_t max_v = 100;
+    float global_avg = 0;
+    Results result[L];
+    for (uint16_t v = 0; v < max_v; ++v)
+    {
+        expressions.clear();
+        guess_cache.clear();
+        populate_expressions(v);
+
+        float avg = 0;
+        for (uint16_t i = 0; i < expressions.size(); ++i)
+        {
+            State state;
+            const char *hidden = expressions[i].s;
+
+            int j = 0;
+            bool r = true;
+            for (; j < 6 and r; ++j)
+            {
+                const char *guess = find_guess(state);
+                r = not play(result, guess, hidden);
+                if (verbose)
+                {
+                    print_move(result, guess);
+                    std::cout << " ";
+                }
+
+                state.apply(result, guess);
+                state.valid_answers();
+            }
+
+            j += r;
+
+            if (verbose and not r)
+                std::cout << j << std::endl;
+            else if (verbose)
+                printf("%.6s\n", hidden);
+
+            avg += (float)j;
+        }
+
+        avg /= expressions.size();
+        global_avg += avg;
+    }
+
+    global_avg /= max_v;
+    return global_avg;
+}
+
 int main(int argc, char **argv)
 {
-    uint32_t value = atoi(argv[1]);
-    populate_expressions(value);
-
-    while (true)
+    if (argc == 3)
     {
-        const char *hidden = expressions[rand() % expressions.size()].s;
-        check_word(hidden, value);
+        uint32_t value = atoi(argv[2]);
+        populate_expressions(value);
+
+        if (strncmp(argv[1], "?", 1) == 0)
+            interactive();
+        else
+            check_word(argv[1]);
+    }
+    else
+    {
+        float r = evaluate(true);
+        std::cout << "Average Guesses: " << r << std::endl;
     }
 
     return 0;
