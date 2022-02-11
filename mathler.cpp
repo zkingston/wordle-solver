@@ -26,7 +26,9 @@ static const char *COLOR[3] = {BLK, YEL, GRN};
 #define L 6
 #define N_THREADS 8
 #define NUMBERS 0x3FF0
+#define NO_ZERO 0x3FE0
 #define ALL_SYM 0x3FFF
+#define SYMMASK 0x000F
 
 enum Symbol
 {
@@ -87,7 +89,7 @@ inline uint16_t get_mask(char c)
 static std::vector<Expression> expressions;
 struct State
 {
-    uint16_t valid[L] = {NUMBERS, ALL_SYM, ALL_SYM, ALL_SYM, ALL_SYM, NUMBERS};
+    uint16_t valid[L] = {NO_ZERO, ALL_SYM, ALL_SYM, ALL_SYM, ALL_SYM, NUMBERS};
     uint32_t include = 0;  // values that must be included
 
     std::vector<uint16_t> answers;
@@ -96,6 +98,15 @@ struct State
     {
         answers.resize(expressions.size());
         std::iota(answers.begin(), answers.end(), 0);
+    }
+
+    bool operator==(const State &other) const
+    {
+        bool r = include == other.include;
+        for (uint8_t i = 0; i < L and r; ++i)
+            r &= valid[i] == other.valid[i];
+
+        return r;
     }
 
     void apply(const Results result[L], const char *guess)
@@ -317,6 +328,12 @@ void print_move(Results result[L], const char *guess, const char *hidden = nullp
 
 const char *find_guess(const State &state)
 {
+    // lookup result from cache if the best play for this state was already computed
+    static std::unordered_map<const State, uint16_t, StateHash> guess_cache;
+    const auto &it = guess_cache.find(state);
+    if (it != guess_cache.end())
+        return expressions[it->second].s;
+
     if (state.answers.size() == 1)  // only one word left
         return expressions[state.answers[0]].s;
 
@@ -365,6 +382,7 @@ const char *find_guess(const State &state)
             best_word[0] = best_word[i];
         }
 
+    guess_cache.emplace(state, best_word[0]);
     return expressions[best_word[0]].s;
 }
 
@@ -376,8 +394,6 @@ void check_word(const char *hidden, uint32_t value)
     bool r = true;
     for (uint8_t i = 0; i < 6 and r; ++i)
     {
-        // const char *guess = expressions[rand() % expressions.size()].s;
-        // const char *guess = expressions[state.answers[rand() % state.answers.size()]].s;
         const char *guess = find_guess(state);
         r = not play(result, guess, hidden);
 
@@ -398,8 +414,11 @@ int main(int argc, char **argv)
     uint32_t value = atoi(argv[1]);
     populate_expressions(value);
 
-    const char *hidden = expressions[rand() % expressions.size()].s;
-    check_word(hidden, value);
+    while (true)
+    {
+        const char *hidden = expressions[rand() % expressions.size()].s;
+        check_word(hidden, value);
+    }
 
     return 0;
 }
