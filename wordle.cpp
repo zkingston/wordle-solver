@@ -130,9 +130,11 @@ struct State
         bool r = true;
         uint32_t required = include;
         const auto &mask = MASKED_ANSWERS[index];
-        for (uint8_t i = 0; i < L and r; ++i)
+        for (uint8_t i = 0; i < L; ++i)
         {
             r &= (bool)(valid[i] & mask[i]);
+            if (not r)
+                return false;
             required -= required & mask[i];
         }
 
@@ -264,6 +266,7 @@ const char *find_guess(const State &state)
 
     for (uint8_t id = 0; id < N_THREADS; ++id)
         threads[id] = std::thread([&, id]() {
+            Results result[L];
             const uint16_t start = (uint16_t)(BLOCK * id);
             const uint16_t end =
                 (uint16_t)(start + BLOCK + ((id == N_THREADS - 1) ? N_WORDS % N_THREADS : 0));
@@ -273,7 +276,6 @@ const char *find_guess(const State &state)
                 const char *guess = get_word(i);
                 for (const auto &answer : ANSWERS)
                 {
-                    Results result[L];
                     play(result, guess, get_valid_word(answer));
 
                     State next = state;
