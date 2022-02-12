@@ -219,7 +219,7 @@ const char *find_guess(const State &state)
 
     const uint16_t block = (uint16_t)(N_WORDS / N_THREADS);
 
-    float best_score[N_THREADS] = {};
+    uint32_t best_score[N_THREADS];
     uint16_t best_word[N_THREADS];
 
     std::thread threads[N_THREADS];
@@ -228,9 +228,11 @@ const char *find_guess(const State &state)
             const uint16_t start = (uint16_t)(block * id);
             const uint16_t end =
                 (uint16_t)(start + block + ((id == N_THREADS - 1) ? N_WORDS % N_THREADS : 0));
+
+            best_score[id] = std::numeric_limits<uint32_t>::max();
             for (uint16_t i = start; i < end; ++i)
             {
-                float score = 0;
+                uint32_t score = 0;
                 const char *guess = get_word(i);
                 for (const auto &answer : ANSWERS)
                 {
@@ -239,10 +241,10 @@ const char *find_guess(const State &state)
 
                     State next = state;
                     next.apply(result, guess);
-                    score += (float)(ANSWERS.size() - next.num_answers());
+                    score += next.num_answers();
                 }
 
-                if (score > best_score[id])
+                if (score < best_score[id])
                 {
                     best_score[id] = score;
                     best_word[id] = i;
@@ -254,7 +256,7 @@ const char *find_guess(const State &state)
         thread.join();
 
     for (uint8_t i = 1; i < N_THREADS; ++i)
-        if (best_score[i] > best_score[0])
+        if (best_score[i] < best_score[0])
         {
             best_score[0] = best_score[i];
             best_word[0] = best_word[i];
@@ -264,11 +266,12 @@ const char *find_guess(const State &state)
     return get_word(best_word[0]);
 }
 
-float evaluate(bool verbose)
+void evaluate()
 {
     float avg = 0;
-
     Results result[L];
+    uint16_t totals[7] = {};
+
     for (uint16_t i = 0; i < N_VALID; ++i)
     {
         State state;
@@ -280,21 +283,19 @@ float evaluate(bool verbose)
         {
             const char *guess = find_guess(state);
             r = not play(result, guess, hidden);
-            if (verbose)
-            {
-                print_move(result, guess);
-                std::cout << " ";
-            }
+            print_move(result, guess);
+            std::cout << " ";
 
             state.apply(result, guess);
             state.valid_answers();
         }
 
         j += r;
+        totals[j]++;
 
-        if (verbose and not r)
+        if (not r)
             std::cout << j << std::endl;
-        else if (verbose)
+        else
             printf("%.5s\n", hidden);
 
         avg += (float)j;
@@ -303,7 +304,9 @@ float evaluate(bool verbose)
         std::iota(ANSWERS.begin(), ANSWERS.end(), 0);
     }
 
-    return avg / N_VALID;
+    for (uint8_t i = 0; i < 7; ++i)
+        std::cout << (int)i << " ";
+    std::cout << "Avg: " << avg / N_VALID << std::endl;
 }
 
 void check_word(const char *hidden)
@@ -405,10 +408,7 @@ int main(int argc, char **argv)
             check_word(argv[1]);
 
     else
-    {
-        float r = evaluate(true);
-        std::cout << "Average Guesses: " << r << std::endl;
-    }
+        evaluate();
 
     return 0;
 }
