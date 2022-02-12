@@ -42,7 +42,8 @@ static uint32_t MASKS[255];                 // cached masks for each character
 static char *VALID_WORDS;  // valid answers
 static char *WORDS;        // valid guesses
 
-static std::vector<uint16_t> ANSWERS;  // set of valid answers
+static uint32_t MASKED_ANSWERS[N_VALID][L];  // premasked answers
+static std::vector<uint16_t> ANSWERS;        // set of valid answers
 
 // memory map a file
 static char *map(const char *file)
@@ -124,15 +125,15 @@ struct State
             print_mask(valid[i]);
     }
 
-    bool is_valid(const char *word) const
+    inline bool is_valid(uint16_t index) const
     {
         bool r = true;
         uint32_t required = include;
+        const auto &mask = MASKED_ANSWERS[index];
         for (uint8_t i = 0; i < L and r; ++i)
         {
-            const uint32_t m = GET_MASK(word[i]);
-            r &= (bool)(valid[i] & m);
-            required -= required & m;
+            r &= (bool)(valid[i] & mask[i]);
+            required -= required & mask[i];
         }
 
         return r and not required;
@@ -141,9 +142,9 @@ struct State
     void valid_answers()
     {
         uint16_t k = 0;
-        for (uint16_t i = 0; i < ANSWERS.size(); ++i)
-            if (is_valid(get_valid_word(ANSWERS[i])))
-                ANSWERS[k++] = ANSWERS[i];
+        for (const auto &answer : ANSWERS)
+            if (is_valid(answer))
+                ANSWERS[k++] = answer;
 
         ANSWERS.resize(k);
     }
@@ -152,7 +153,7 @@ struct State
     {
         int k = 0;
         for (const auto &answer : ANSWERS)
-            k += is_valid(get_valid_word(answer));
+            k += is_valid(answer);
 
         return (uint16_t)k;
     }
@@ -161,7 +162,7 @@ struct State
 bool play(Results result[L], const char *guess, const char *hidden)
 {
     bool r = true;
-    bool done[5];
+    bool done[L];
 
     for (uint8_t i = 0; i < L; ++i)
     {
@@ -349,7 +350,7 @@ void check_word(const char *hidden)
 
     bool found = false;
     for (uint16_t i = 0; i < N_VALID and not found; ++i)
-        found |= strncmp(hidden, get_valid_word(i), 5) == 0;
+        found |= strncmp(hidden, get_valid_word(i), L) == 0;
 
     if (not found)
     {
@@ -433,6 +434,14 @@ int main(int argc, char **argv)
     // Initialize mask cache
     for (char c = 'a'; c <= 'z'; ++c)
         GET_MASK(c) = MASK(c);
+
+    // Initialize answer mask cache
+    for (uint16_t i = 0; i < N_VALID; ++i)
+    {
+        const char *word = get_valid_word(i);
+        for (uint8_t j = 0; j < L; ++j)
+            MASKED_ANSWERS[i][j] = GET_MASK(word[j]);
+    }
 
     if (argc == 2)
         if (strncmp(argv[1], "?", 1) == 0)
