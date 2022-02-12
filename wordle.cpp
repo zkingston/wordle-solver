@@ -127,18 +127,16 @@ struct State
 
     inline bool is_valid(uint16_t index) const
     {
-        bool r = true;
         uint32_t required = include;
         const auto &mask = MASKED_ANSWERS[index];
         for (uint8_t i = 0; i < L; ++i)
         {
-            r &= (bool)(valid[i] & mask[i]);
-            if (not r)
+            if (not(valid[i] & mask[i]))
                 return false;
             required -= required & mask[i];
         }
 
-        return r and not required;
+        return not required;
     }
 
     void valid_answers()
