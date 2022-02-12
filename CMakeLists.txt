@@ -9,7 +9,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 set(CMAKE_CXX_FLAGS_DEBUG "-g -pg ${CMAKE_CXX_FLAGS_DEBUG}")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -funsafe-loop-optimizations -fdelete-null-pointer-checks -ftree-loop-linear -floop-interchange -floop-strip-mine -floop-block -ftree-loop-distribution -fprefetch-loop-arrays -fvariable-expansion-in-unroller -freorder-blocks-and-partition -flto -ffast-math -funsafe-math-optimizations -funroll-loops -funswitch-loops ${CMAKE_CXX_FLAGS_RELEASE}")
+set(CMAKE_CXX_FLAGS_RELEASE "-Ofast -march=native -funsafe-loop-optimizations -fdelete-null-pointer-checks -ftree-loop-linear -floop-interchange -floop-strip-mine -floop-block -ftree-loop-distribution -fprefetch-loop-arrays -fvariable-expansion-in-unroller -freorder-blocks-and-partition -flto -ffast-math -funsafe-math-optimizations -fno-signed-zeros -fno-trapping-math -frename-registers -funroll-loops -funswitch-loops ${CMAKE_CXX_FLAGS_RELEASE}")
 
 set(CMAKE_CXX_FLAGS
   "-W -Wall -Wextra -Wconversion -Wcast-qual -Wwrite-strings -Wunreachable-code -Wpointer-arith -Winit-self -Wredundant-decls -Wno-unused-parameter -Wno-unused-function")
