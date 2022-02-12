@@ -40,9 +40,9 @@ static char *VALID_WORDS;  // valid answers
 static char *WORDS;        // valid guesses
 
 // memory map a file
-static char *map(const std::string &file)
+static char *map(const char *file)
 {
-    int fd = open(file.c_str(), O_RDONLY);
+    int fd = open(file, O_RDONLY);
 
     struct stat s;
     fstat(fd, &s);
@@ -51,48 +51,30 @@ static char *map(const std::string &file)
 }
 
 // get the answer at index idx
-const char *get_valid_word(uint16_t idx)
+inline const char *get_valid_word(uint16_t idx)
 {
     return &VALID_WORDS[6 * idx];
 }
 
 // get the guess at index idx
-const char *get_word(uint16_t idx)
+inline const char *get_word(uint16_t idx)
 {
     return &WORDS[6 * idx];
 }
+
+static std::vector<uint16_t> ANSWERS;  // set of valid answers given state
 
 // state which encodes known information
 // uses bitmasks to encode letter information - e.g., bit #3 corresponds to `c`
 struct State
 {
     // bitmasks for valid characters at each position
-    uint32_t valid[L] = {ALL_26, ALL_26, ALL_26, ALL_26, ALL_26};
-    uint32_t include = 0;           // letters that must be in the word
-    std::vector<uint16_t> words;    // set of valid guesses given state
-    std::vector<uint16_t> answers;  // set of valid answers given state
-
-    State()
-    {
-        words.resize(N_WORDS);
-        std::iota(words.begin(), words.end(), 0);
-        answers.resize(N_VALID);
-        std::iota(answers.begin(), answers.end(), 0);
-    }
-
-    State(const State &other) : include(other.include), words(other.words), answers(other.answers)
-    {
-        for (uint8_t i = 0; i < L; ++i)
-            valid[i] = other.valid[i];
-    }
+    std::array<uint32_t, L> valid = {ALL_26, ALL_26, ALL_26, ALL_26, ALL_26};
+    uint32_t include = 0;  // letters that must be in the word
 
     bool operator==(const State &other) const
     {
-        bool r = include == other.include;
-        for (uint8_t i = 0; i < L and r; ++i)
-            r &= valid[i] == other.valid[i];
-
-        return r;
+        return include == other.include and valid == other.valid;
     }
 
     void apply(const Results result[L], const char *guess)
@@ -133,7 +115,7 @@ struct State
 
     void print() const
     {
-        std::cout << words.size() << " / " << answers.size() << std::endl;
+        std::cout << N_WORDS << " / " << ANSWERS.size() << std::endl;
         print_mask(include);
         for (uint8_t i = 0; i < L; ++i)
             print_mask(valid[i]);
@@ -153,24 +135,23 @@ struct State
         return r and not required;
     }
 
-    void valid_sets()
-    {
-        uint16_t j = 0;
-        for (uint16_t i = 0; i < words.size(); ++i)
-            if (is_valid(get_word(words[i])))
-                words[j++] = words[i];
-
-        words.resize(j);
-    }
-
     void valid_answers()
     {
         uint16_t k = 0;
-        for (uint16_t i = 0; i < answers.size(); ++i)
-            if (is_valid(get_valid_word(answers[i])))
-                answers[k++] = answers[i];
+        for (uint16_t i = 0; i < ANSWERS.size(); ++i)
+            if (is_valid(get_valid_word(ANSWERS[i])))
+                ANSWERS[k++] = ANSWERS[i];
 
-        answers.resize(k);
+        ANSWERS.resize(k);
+    }
+
+    uint16_t num_answers() const
+    {
+        int k = 0;
+        for (const auto &answer : ANSWERS)
+            k += is_valid(get_valid_word(answer));
+
+        return (uint16_t)k;
     }
 };
 
@@ -211,7 +192,6 @@ void print_move(Results result[L], const char *guess, const char *hidden = nullp
         for (uint8_t i = 0; i < L; ++i)
             std::cout << hidden[i];
     }
-    std::cout << RST;
 }
 
 class StateHash
@@ -234,40 +214,38 @@ const char *find_guess(const State &state)
     if (it != guess_cache.end())
         return get_word(it->second);
 
-    if (state.answers.size() == 1)  // only one word left
-        return get_word(state.answers[0]);
+    if (ANSWERS.size() == 1)  // only one word left
+        return get_word(ANSWERS[0]);
 
-    const uint8_t n = (state.words.size() > N_THREADS) ? N_THREADS : 1;
-    const uint16_t block = (uint16_t)(state.words.size() / n);
+    const uint16_t block = (uint16_t)(N_WORDS / N_THREADS);
 
-    float best_score[n] = {};
-    uint16_t best_word[n];
+    float best_score[N_THREADS] = {};
+    uint16_t best_word[N_THREADS];
 
-    std::thread threads[n];
-    for (uint8_t id = 0; id < n; ++id)
+    std::thread threads[N_THREADS];
+    for (uint8_t id = 0; id < N_THREADS; ++id)
         threads[id] = std::thread([&, id]() {
             const uint16_t start = (uint16_t)(block * id);
-            const uint16_t end = (uint16_t)(start + block + ((id == n - 1) ? state.words.size() % n : 0));
+            const uint16_t end =
+                (uint16_t)(start + block + ((id == N_THREADS - 1) ? N_WORDS % N_THREADS : 0));
             for (uint16_t i = start; i < end; ++i)
             {
                 float score = 0;
-                const char *guess = get_word(state.words[i]);
-                for (const auto &answer : state.answers)
+                const char *guess = get_word(i);
+                for (const auto &answer : ANSWERS)
                 {
                     Results result[L];
                     play(result, guess, get_valid_word(answer));
 
                     State next = state;
                     next.apply(result, guess);
-                    next.valid_answers();
-
-                    score += (float)(state.answers.size() - next.answers.size());
+                    score += (float)(ANSWERS.size() - next.num_answers());
                 }
 
                 if (score > best_score[id])
                 {
                     best_score[id] = score;
-                    best_word[id] = state.words[i];
+                    best_word[id] = i;
                 }
             }
         });
@@ -275,7 +253,7 @@ const char *find_guess(const State &state)
     for (auto &thread : threads)
         thread.join();
 
-    for (uint8_t i = 1; i < n; ++i)
+    for (uint8_t i = 1; i < N_THREADS; ++i)
         if (best_score[i] > best_score[0])
         {
             best_score[0] = best_score[i];
@@ -300,8 +278,7 @@ float evaluate(bool verbose)
         bool r = true;
         for (; j < 6 and r; ++j)
         {
-            // simple optimization as "roate" is the first word always found
-            const char *guess = (j == 0) ? "roate" : find_guess(state);
+            const char *guess = find_guess(state);
             r = not play(result, guess, hidden);
             if (verbose)
             {
@@ -321,6 +298,9 @@ float evaluate(bool verbose)
             printf("%.5s\n", hidden);
 
         avg += (float)j;
+
+        ANSWERS.resize(N_VALID);
+        std::iota(ANSWERS.begin(), ANSWERS.end(), 0);
     }
 
     return avg / N_VALID;
@@ -344,8 +324,7 @@ void check_word(const char *hidden)
     bool r = true;
     for (uint8_t i = 0; i < 6 and r; ++i)
     {
-        // simple optimization as "roate" is the first word always found
-        const char *guess = (i == 0) ? "roate" : find_guess(state);
+        const char *guess = find_guess(state);
         r = not play(result, guess, hidden);
 
         print_move(result, guess, hidden);
@@ -367,10 +346,9 @@ void interactive()
 
     std::cout << "After each guess, enter in result (string of 5 of {b,y,g}, e.g., bbygb)" << std::endl;
 
-    for (uint8_t i = 0; i < 6 and state.answers.size() > 1; ++i)
+    for (uint8_t i = 0; i < 6 and ANSWERS.size() > 1; ++i)
     {
-        // simple optimization as "roate" is the first word always found
-        const char *guess = (i == 0) ? "roate" : find_guess(state);
+        const char *guess = find_guess(state);
         printf("Guess : %.5s\nResult: ", guess);
 
         while (true)
@@ -404,7 +382,7 @@ void interactive()
         std::cout << std::endl;
     }
 
-    printf("Answer: %.5s\n", get_word(state.answers[0]));
+    printf("Answer: %.5s\n", get_word(ANSWERS[0]));
 }
 
 int main(int argc, char **argv)
@@ -412,6 +390,9 @@ int main(int argc, char **argv)
     // Iniitalize word files
     VALID_WORDS = map("words_hidden");
     WORDS = map("words_all");
+
+    ANSWERS.resize(N_VALID);
+    std::iota(ANSWERS.begin(), ANSWERS.end(), 0);
 
     // Initialize mask cache
     for (char c = 'a'; c <= 'z'; ++c)
