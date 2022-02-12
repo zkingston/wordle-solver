@@ -250,14 +250,14 @@ struct Guess
 
 const char *find_guess(const State &state)
 {
+    if (ANSWERS.size() == 1)  // only one word left
+        return get_word(ANSWERS[0]);
+
     // lookup result from cache if the best play for this state was already computed
     static std::unordered_map<const State, uint16_t, StateHash> guess_cache;
     const auto &it = guess_cache.find(state);
     if (it != guess_cache.end())
         return get_word(it->second);
-
-    if (ANSWERS.size() == 1)  // only one word left
-        return get_word(ANSWERS[0]);
 
     Guess guesses[N_THREADS];
     std::thread threads[N_THREADS];
