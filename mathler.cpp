@@ -25,6 +25,7 @@ static const char *COLOR[3] = {BLK, YEL, GRN};
 
 #define L 6
 #define N_THREADS 8
+
 #define NUMBERS 0x3FF0
 #define NO_ZERO 0x3FE0
 #define ALL_SYM 0x3FFF
@@ -41,26 +42,6 @@ enum Symbol
 
 static char SYMBOLS[9] = {0, '+', '-', 0, '*', 0, 0, 0, '/'};
 
-struct Expression
-{
-    char s[L + 1];
-
-    Expression(uint16_t a, Symbol op1, uint16_t b)
-    {
-        snprintf(s, L + 1, "%u%c%u", a, SYMBOLS[op1], b);
-    }
-
-    Expression(uint16_t a, Symbol op1, uint16_t b, Symbol op2, uint16_t c)
-    {
-        snprintf(s, L + 1, "%u%c%u%c%u", a, SYMBOLS[op1], b, SYMBOLS[op2], c);
-    }
-
-    void print() const
-    {
-        printf("%.6s\n", s);
-    }
-};
-
 inline uint16_t get_mask(char c)
 {
     if ('0' <= c and c <= '9')
@@ -76,7 +57,9 @@ inline uint16_t get_mask(char c)
     return 0;
 }
 
-static std::vector<Expression> expressions;
+static char EXPS[2000][L];
+static uint16_t NUM_EXPS;
+
 struct State
 {
     uint16_t valid[L] = {NO_ZERO, ALL_SYM, ALL_SYM, ALL_SYM, ALL_SYM, NUMBERS};
@@ -86,7 +69,7 @@ struct State
 
     State()
     {
-        answers.resize(expressions.size());
+        answers.resize(NUM_EXPS);
         std::iota(answers.begin(), answers.end(), 0);
     }
 
@@ -141,13 +124,13 @@ struct State
 
     void print() const
     {
-        std::cout << expressions.size() << " / " << answers.size() << std::endl;
+        std::cout << NUM_EXPS << " / " << answers.size() << std::endl;
         print_mask(include);
         for (uint8_t i = 0; i < L; ++i)
             print_mask(valid[i]);
     }
 
-    bool is_valid(const char *word) const
+    inline bool is_valid(const char *word) const
     {
         bool r = true;
         uint32_t required = include;
@@ -165,7 +148,7 @@ struct State
     {
         uint16_t j = 0;
         for (uint16_t i = 0; i < answers.size(); ++i)
-            if (is_valid(expressions[answers[i]].s))
+            if (is_valid(EXPS[answers[i]]))
                 answers[j++] = answers[i];
 
         answers.resize(j);
@@ -189,8 +172,20 @@ inline uint8_t n_digits(uint16_t v)
     return (v >= 1000) ? 4 : ((v >= 100) ? 3 : ((v >= 10) ? 2 : 1));
 }
 
-void populate_expressions(uint32_t value)
+inline void to_expression(char *s, uint16_t a, Symbol op1, uint16_t b)
 {
+    snprintf(s, L + 1, "%u%c%u", a, SYMBOLS[op1], b);
+}
+
+inline void to_expression(char *s, uint16_t a, Symbol op1, uint16_t b, Symbol op2, uint16_t c)
+{
+    snprintf(s, L + 1, "%u%c%u%c%u", a, SYMBOLS[op1], b, SYMBOLS[op2], c);
+}
+
+void populate_expressions(uint16_t value)
+{
+    NUM_EXPS = 0;
+
     static uint16_t maxes[5] = {0, 9, 99, 999, 9999};
     for (uint16_t v = 1; v <= maxes[4]; ++v)
     {
@@ -208,69 +203,67 @@ void populate_expressions(uint32_t value)
 
                 if (vn + wn + xn == 4)
                 {
-                    if ((uint32_t)(v + w + x) == value)
-                        expressions.emplace_back(v, PLUS, w, PLUS, x);
-                    if ((uint32_t)(v + w - x) == value)
-                        expressions.emplace_back(v, PLUS, w, MINUS, x);
-                    if ((uint32_t)(v + w * x) == value)
-                        expressions.emplace_back(v, PLUS, w, MULT, x);
-                    if ((uint32_t)(v - w * x) == value)
-                        expressions.emplace_back(v, MINUS, w, MULT, x);
-                    if ((uint32_t)(v * w + x) == value)
-                        expressions.emplace_back(v, MULT, w, PLUS, x);
-                    if ((uint32_t)(v * w - x) == value)
-                        expressions.emplace_back(v, MULT, w, MINUS, x);
-                    if ((uint32_t)(v * w * x) == value)
-                        expressions.emplace_back(v, MULT, w, MULT, x);
+                    if ((uint16_t)(v + w + x) == value)
+                        to_expression(EXPS[NUM_EXPS++], v, PLUS, w, PLUS, x);
+                    if ((uint16_t)(v + w - x) == value)
+                        to_expression(EXPS[NUM_EXPS++], v, PLUS, w, MINUS, x);
+                    if ((uint16_t)(v + w * x) == value)
+                        to_expression(EXPS[NUM_EXPS++], v, PLUS, w, MULT, x);
+                    if ((uint16_t)(v - w * x) == value)
+                        to_expression(EXPS[NUM_EXPS++], v, MINUS, w, MULT, x);
+                    if ((uint16_t)(v * w + x) == value)
+                        to_expression(EXPS[NUM_EXPS++], v, MULT, w, PLUS, x);
+                    if ((uint16_t)(v * w - x) == value)
+                        to_expression(EXPS[NUM_EXPS++], v, MULT, w, MINUS, x);
+                    if ((uint16_t)(v * w * x) == value)
+                        to_expression(EXPS[NUM_EXPS++], v, MULT, w, MULT, x);
 
                     if (v > w)
                     {
-                        if ((uint32_t)(v - w + x) == value)
-                            expressions.emplace_back(v, MINUS, w, PLUS, x);
-                        if ((uint32_t)(v - w - x) == value)
-                            expressions.emplace_back(v, MINUS, w, MINUS, x);
+                        if ((uint16_t)(v - w + x) == value)
+                            to_expression(EXPS[NUM_EXPS++], v, MINUS, w, PLUS, x);
+                        if ((uint16_t)(v - w - x) == value)
+                            to_expression(EXPS[NUM_EXPS++], v, MINUS, w, MINUS, x);
                     }
 
                     const bool vwd = v % w == 0;
                     const bool wxd = w % x == 0;
+
                     if (vwd)
                     {
-                        if ((uint32_t)(v / w + x) == value)
-                            expressions.emplace_back(v, DIV, w, PLUS, x);
-                        if ((uint32_t)(v / w - x) == value)
-                            expressions.emplace_back(v, DIV, w, MINUS, x);
-                        if ((uint32_t)(v / w * x) == value)
-                            expressions.emplace_back(v, DIV, w, MULT, x);
+                        if ((uint16_t)(v / w + x) == value)
+                            to_expression(EXPS[NUM_EXPS++], v, DIV, w, PLUS, x);
+                        if ((uint16_t)(v / w - x) == value)
+                            to_expression(EXPS[NUM_EXPS++], v, DIV, w, MINUS, x);
+                        if ((uint16_t)(v / w * x) == value)
+                            to_expression(EXPS[NUM_EXPS++], v, DIV, w, MULT, x);
                     }
 
                     if (wxd)
                     {
-                        if ((uint32_t)(v + w / x) == value)
-                            expressions.emplace_back(v, PLUS, w, DIV, x);
-                        if ((uint32_t)(v - w / x) == value)
-                            expressions.emplace_back(v, MINUS, w, DIV, x);
+                        if ((uint16_t)(v + w / x) == value)
+                            to_expression(EXPS[NUM_EXPS++], v, PLUS, w, DIV, x);
+                        if ((uint16_t)(v - w / x) == value)
+                            to_expression(EXPS[NUM_EXPS++], v, MINUS, w, DIV, x);
                     }
 
-                    if (vwd and wxd)
-                    {
-                        if ((uint32_t)(v * w / x) == value)
-                            expressions.emplace_back(v, MULT, w, DIV, x);
-                        if ((uint32_t)(v / w / x) == value)
-                            expressions.emplace_back(v, DIV, w, DIV, x);
-                    }
+                    if ((v * w) % x == 0 and (uint16_t)(v * w / x) == value)
+                        to_expression(EXPS[NUM_EXPS++], v, MULT, w, DIV, x);
+                    if (vwd and (v / w) % x == 0 and (uint16_t)(v / w / x) == value)
+                        to_expression(EXPS[NUM_EXPS++], v, DIV, w, DIV, x);
                 }
             }
 
             if (vn + wn == 5)
             {
-                if ((uint32_t)(v + w) == value)
-                    expressions.emplace_back(v, PLUS, w);
-                if ((uint32_t)(v - w) == value)
-                    expressions.emplace_back(v, MINUS, w);
-                if ((uint32_t)(v * w) == value)
-                    expressions.emplace_back(v, MULT, w);
-                if (v % w == 0 and (uint32_t)(v / w) == value)
-                    expressions.emplace_back(v, DIV, w);
+                if ((uint16_t)(v + w) == value)
+                    to_expression(EXPS[NUM_EXPS++], v, PLUS, w);
+                if ((uint16_t)(v - w) == value)
+                    to_expression(EXPS[NUM_EXPS++], v, MINUS, w);
+                if ((uint16_t)(v * w) == value)
+                    to_expression(EXPS[NUM_EXPS++], v, MULT, w);
+                if (v % w == 0 and (uint16_t)(v / w) == value)
+                    to_expression(EXPS[NUM_EXPS++], v, DIV, w);
             }
         }
     }
@@ -322,13 +315,13 @@ const char *find_guess(const State &state)
     // lookup result from cache if the best play for this state was already computed
     const auto &it = guess_cache.find(state);
     if (it != guess_cache.end())
-        return expressions[it->second].s;
+        return EXPS[it->second];
 
     if (state.answers.size() == 1)  // only one word left
-        return expressions[state.answers[0]].s;
+        return EXPS[state.answers[0]];
 
-    const uint8_t n = (expressions.size() > N_THREADS) ? N_THREADS : 1;
-    const uint16_t block = (uint16_t)(expressions.size() / n);
+    const uint8_t n = (NUM_EXPS > N_THREADS) ? N_THREADS : 1;
+    const uint16_t block = (uint16_t)(NUM_EXPS / n);
 
     float best_score[n] = {};
     uint16_t best_word[n];
@@ -337,15 +330,15 @@ const char *find_guess(const State &state)
     for (uint8_t id = 0; id < n; ++id)
         threads[id] = std::thread([&, id]() {
             const uint16_t start = (uint16_t)(block * id);
-            const uint16_t end = (uint16_t)(start + block + ((id == n - 1) ? expressions.size() % n : 0));
+            const uint16_t end = (uint16_t)(start + block + ((id == n - 1) ? NUM_EXPS % n : 0));
             for (uint16_t i = start; i < end; ++i)
             {
                 float score = 0;
-                const char *guess = expressions[i].s;
+                const char *guess = EXPS[i];
                 for (const auto &answer : state.answers)
                 {
                     Results result[L];
-                    play(result, guess, expressions[answer].s);
+                    play(result, guess, EXPS[answer]);
 
                     State next = state;
                     next.apply(result, guess);
@@ -373,7 +366,7 @@ const char *find_guess(const State &state)
         }
 
     guess_cache.emplace(state, best_word[0]);
-    return expressions[best_word[0]].s;
+    return EXPS[best_word[0]];
 }
 
 void check_word(const char *hidden)
@@ -442,25 +435,26 @@ void interactive()
         std::cout << std::endl;
     }
 
-    printf("Answer: %.6s\n", expressions[state.answers[0]].s);
+    printf("Answer: %.6s\n", EXPS[state.answers[0]]);
 }
 
-float evaluate(bool verbose)
+float evaluate(uint16_t value, bool all = false, bool verbose = true)
 {
-    const uint16_t max_v = 100;
+    const uint16_t min_v = (all) ? 0 : value;
+    const uint16_t max_v = (all) ? 100 : (uint16_t)(value + 1);
+
     float global_avg = 0;
     Results result[L];
-    for (uint16_t v = 0; v < max_v; ++v)
+    for (uint16_t v = min_v; v < max_v; ++v)
     {
-        expressions.clear();
         guess_cache.clear();
         populate_expressions(v);
 
         float avg = 0;
-        for (uint16_t i = 0; i < expressions.size(); ++i)
+        for (uint16_t i = 0; i < NUM_EXPS; ++i)
         {
             State state;
-            const char *hidden = expressions[i].s;
+            const char *hidden = EXPS[i];
 
             int j = 0;
             bool r = true;
@@ -488,29 +482,43 @@ float evaluate(bool verbose)
             avg += (float)j;
         }
 
-        avg /= expressions.size();
+        avg /= (float)NUM_EXPS;
         global_avg += avg;
     }
 
-    global_avg /= max_v;
+    global_avg /= (float)(max_v - min_v);
     return global_avg;
 }
 
 int main(int argc, char **argv)
 {
-    if (argc == 3)
+    if (argc == 2)
     {
-        uint32_t value = atoi(argv[2]);
+        uint16_t value = (uint16_t)atoi(argv[1]);
+        float r = evaluate(value, false);
+        std::cout << "Average Guesses: " << r << std::endl;
+    }
+    else if (argc == 3)
+    {
+        uint16_t value = (uint16_t)atoi(argv[2]);
         populate_expressions(value);
 
         if (strncmp(argv[1], "?", 1) == 0)
             interactive();
+
+        else if (strncmp(argv[1], "list", 4) == 0)
+        {
+            for (uint16_t i = 0; i < NUM_EXPS; ++i)
+                printf("%.6s\n", EXPS[i]);
+
+            std::cout << "Total: " << NUM_EXPS << std::endl;
+        }
         else
             check_word(argv[1]);
     }
     else
     {
-        float r = evaluate(true);
+        float r = evaluate(0, true);
         std::cout << "Average Guesses: " << r << std::endl;
     }
 
