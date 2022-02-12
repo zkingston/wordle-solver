@@ -31,6 +31,9 @@ static const char *COLOR[3] = {BLK, YEL, GRN};
 #define N_WORDS 12972u     // number of valid guesses
 #define N_THREADS 8u       // number of threads to use
 #define ALL_26 0x03FFFFFF  // bitmask for 26
+#define U32MAX std::numeric_limits<uint32_t>::max()
+#define BLOCK (uint16_t)(N_WORDS / N_THREADS)
+#define MINMAX true
 
 static uint32_t MASKS[255];                 // cached masks for each character
 #define MASK(c) (uint32_t)(1 << (c - 'a'))  // get bitmask for char
@@ -38,6 +41,8 @@ static uint32_t MASKS[255];                 // cached masks for each character
 
 static char *VALID_WORDS;  // valid answers
 static char *WORDS;        // valid guesses
+
+static std::vector<uint16_t> ANSWERS;  // set of valid answers
 
 // memory map a file
 static char *map(const char *file)
@@ -50,19 +55,17 @@ static char *map(const char *file)
     return (char *)mmap(0, s.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
 }
 
-// get the answer at index idx
+// get the answer at word idx
 inline const char *get_valid_word(uint16_t idx)
 {
     return &VALID_WORDS[6 * idx];
 }
 
-// get the guess at index idx
+// get the guess at word idx
 inline const char *get_word(uint16_t idx)
 {
     return &WORDS[6 * idx];
 }
-
-static std::vector<uint16_t> ANSWERS;  // set of valid answers given state
 
 // state which encodes known information
 // uses bitmasks to encode letter information - e.g., bit #3 corresponds to `c`
@@ -206,6 +209,44 @@ public:
     }
 };
 
+struct Guess
+{
+    uint32_t max{U32MAX};
+    uint32_t avg{U32MAX};
+    uint32_t best{U32MAX};
+    uint16_t word{0};
+
+    bool operator<(const Guess &other) const
+    {
+        if (MINMAX and max < other.max)
+            return true;
+        if (MINMAX and max > other.max)
+            return false;
+
+        if (avg < other.avg)
+            return true;
+        if (avg > other.avg)
+            return false;
+
+        if (MINMAX and best < other.best)
+            return true;
+        if (MINMAX and best > other.best)
+            return false;
+
+        return word < other.word;
+    }
+
+    void add_score(uint32_t score)
+    {
+        avg += score;
+        if (MINMAX)
+        {
+            max = std::max(score, max);
+            best = std::min(score, best);
+        }
+    }
+};
+
 const char *find_guess(const State &state)
 {
     // lookup result from cache if the best play for this state was already computed
@@ -217,22 +258,17 @@ const char *find_guess(const State &state)
     if (ANSWERS.size() == 1)  // only one word left
         return get_word(ANSWERS[0]);
 
-    const uint16_t block = (uint16_t)(N_WORDS / N_THREADS);
-
-    uint32_t best_score[N_THREADS];
-    uint16_t best_word[N_THREADS];
-
+    Guess guesses[N_THREADS];
     std::thread threads[N_THREADS];
+
     for (uint8_t id = 0; id < N_THREADS; ++id)
         threads[id] = std::thread([&, id]() {
-            const uint16_t start = (uint16_t)(block * id);
+            const uint16_t start = (uint16_t)(BLOCK * id);
             const uint16_t end =
-                (uint16_t)(start + block + ((id == N_THREADS - 1) ? N_WORDS % N_THREADS : 0));
-
-            best_score[id] = std::numeric_limits<uint32_t>::max();
+                (uint16_t)(start + BLOCK + ((id == N_THREADS - 1) ? N_WORDS % N_THREADS : 0));
             for (uint16_t i = start; i < end; ++i)
             {
-                uint32_t score = 0;
+                Guess score = {0, 0, U32MAX, i};
                 const char *guess = get_word(i);
                 for (const auto &answer : ANSWERS)
                 {
@@ -241,14 +277,14 @@ const char *find_guess(const State &state)
 
                     State next = state;
                     next.apply(result, guess);
-                    score += next.num_answers();
+                    score.add_score(next.num_answers());
+
+                    if (score.max > guesses[id].max)
+                        break;
                 }
 
-                if (score < best_score[id])
-                {
-                    best_score[id] = score;
-                    best_word[id] = i;
-                }
+                if (score < guesses[id])
+                    guesses[id] = score;
             }
         });
 
@@ -256,14 +292,11 @@ const char *find_guess(const State &state)
         thread.join();
 
     for (uint8_t i = 1; i < N_THREADS; ++i)
-        if (best_score[i] < best_score[0])
-        {
-            best_score[0] = best_score[i];
-            best_word[0] = best_word[i];
-        }
+        if (guesses[i] < guesses[0])
+            guesses[0] = guesses[i];
 
-    guess_cache.emplace(state, best_word[0]);
-    return get_word(best_word[0]);
+    guess_cache.emplace(state, guesses[0].word);
+    return get_word(guesses[0].word);
 }
 
 void evaluate()
@@ -305,7 +338,7 @@ void evaluate()
     }
 
     for (uint8_t i = 0; i < 7; ++i)
-        std::cout << (int)i << " ";
+        std::cout << totals[i] << " ";
     std::cout << "Avg: " << avg / N_VALID << std::endl;
 }
 
