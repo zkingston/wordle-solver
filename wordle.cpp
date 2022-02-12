@@ -42,8 +42,9 @@ static uint32_t MASKS[255];                 // cached masks for each character
 static char *VALID_WORDS;  // valid answers
 static char *WORDS;        // valid guesses
 
-static uint32_t MASKED_ANSWERS[N_VALID][L];  // premasked answers
-static std::vector<uint16_t> ANSWERS;        // set of valid answers
+static uint32_t MASKED_ANSWERS[N_VALID][L];          // premasked answers
+static uint32_t MASKED_ANSWERS_WHOLE[N_VALID] = {};  // premasked answers
+static std::vector<uint16_t> ANSWERS;                // set of valid answers
 
 // memory map a file
 static char *map(const char *file)
@@ -127,16 +128,10 @@ struct State
 
     inline bool is_valid(uint16_t index) const
     {
-        uint32_t required = include;
         const auto &mask = MASKED_ANSWERS[index];
-        for (uint8_t i = 0; i < L; ++i)
-        {
-            if (not(valid[i] & mask[i]))
-                return false;
-            required -= required & mask[i];
-        }
-
-        return not required;
+        return (valid[0] & mask[0]) and (valid[1] & mask[1]) and (valid[2] & mask[2]) and
+               (valid[3] & mask[3]) and (valid[4] & mask[4]) and
+               not(include - (include & MASKED_ANSWERS_WHOLE[index]));
     }
 
     void valid_answers()
@@ -251,7 +246,7 @@ struct Guess
 const char *find_guess(const State &state)
 {
     if (ANSWERS.size() == 1)  // only one word left
-        return get_word(ANSWERS[0]);
+        return get_valid_word(ANSWERS[0]);
 
     // lookup result from cache if the best play for this state was already computed
     static std::unordered_map<const State, uint16_t, StateHash> guess_cache;
@@ -428,6 +423,7 @@ int main(int argc, char **argv)
     VALID_WORDS = map("words_hidden");
     WORDS = map("words_all");
 
+    // Fill in valid answer set
     ANSWERS.resize(N_VALID);
     std::iota(ANSWERS.begin(), ANSWERS.end(), 0);
 
@@ -440,7 +436,7 @@ int main(int argc, char **argv)
     {
         const char *word = get_valid_word(i);
         for (uint8_t j = 0; j < L; ++j)
-            MASKED_ANSWERS[i][j] = GET_MASK(word[j]);
+            MASKED_ANSWERS_WHOLE[i] |= (MASKED_ANSWERS[i][j] = GET_MASK(word[j]));
     }
 
     if (argc == 2)
