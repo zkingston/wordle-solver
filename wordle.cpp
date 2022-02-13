@@ -129,9 +129,12 @@ struct State
     inline bool is_valid(uint16_t index) const
     {
         const auto &mask = MASKED_ANSWERS[index];
-        return (valid[0] & mask[0]) and (valid[1] & mask[1]) and (valid[2] & mask[2]) and
-               (valid[3] & mask[3]) and (valid[4] & mask[4]) and
-               not(include - (include & MASKED_ANSWERS_WHOLE[index]));
+        return (valid[0] & mask[0])      //
+               and (valid[1] & mask[1])  //
+               and (valid[2] & mask[2])  //
+               and (valid[3] & mask[3])  //
+               and (valid[4] & mask[4])  //
+               and not(include - (include & MASKED_ANSWERS_WHOLE[index]));
     }
 
     void valid_answers()
