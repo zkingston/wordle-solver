@@ -62,9 +62,8 @@ static uint16_t NUM_EXPS;
 
 struct State
 {
-    uint16_t valid[L] = {NO_ZERO, ALL_SYM, ALL_SYM, ALL_SYM, ALL_SYM, NUMBERS};
+    std::array<uint32_t, L> valid = {NO_ZERO, ALL_SYM, ALL_SYM, ALL_SYM, ALL_SYM, NUMBERS};
     uint32_t include = 0;  // values that must be included
-
     std::vector<uint16_t> answers;
 
     State()
@@ -75,11 +74,7 @@ struct State
 
     bool operator==(const State &other) const
     {
-        bool r = include == other.include;
-        for (uint8_t i = 0; i < L and r; ++i)
-            r &= valid[i] == other.valid[i];
-
-        return r;
+        return include == other.include and valid == other.valid;
     }
 
     void apply(const Results result[L], const char *guess)
@@ -132,26 +127,36 @@ struct State
 
     inline bool is_valid(const char *word) const
     {
-        bool r = true;
         uint32_t required = include;
-        for (uint8_t i = 0; i < L and r; ++i)
+        for (uint8_t i = 0; i < L; ++i)
         {
             const uint32_t m = get_mask(word[i]);
-            r &= (bool)(valid[i] & m);
+            if (not(valid[i] & m))
+                return false;
+
             required -= required & m;
         }
 
-        return r and not required;
+        return not required;
     }
 
     void valid_answers()
     {
         uint16_t j = 0;
-        for (uint16_t i = 0; i < answers.size(); ++i)
-            if (is_valid(EXPS[answers[i]]))
-                answers[j++] = answers[i];
+        for (const auto &answer : answers)
+            if (is_valid(EXPS[answer]))
+                answers[j++] = answer;
 
         answers.resize(j);
+    }
+
+    uint16_t num_answers() const
+    {
+        int k = 0;
+        for (const auto &answer : answers)
+            k += is_valid(EXPS[answer]);
+
+        return (uint16_t)k;
     }
 };
 
@@ -306,19 +311,18 @@ void print_move(Results result[L], const char *guess, const char *hidden = nullp
         for (uint8_t i = 0; i < L; ++i)
             std::cout << hidden[i];
     }
-    std::cout << RST;
 }
 
 static std::unordered_map<const State, uint16_t, StateHash> guess_cache;
 const char *find_guess(const State &state)
 {
+    if (state.answers.size() == 1)  // only one word left
+        return EXPS[state.answers[0]];
+
     // lookup result from cache if the best play for this state was already computed
     const auto &it = guess_cache.find(state);
     if (it != guess_cache.end())
         return EXPS[it->second];
-
-    if (state.answers.size() == 1)  // only one word left
-        return EXPS[state.answers[0]];
 
     const uint8_t n = (NUM_EXPS > N_THREADS) ? N_THREADS : 1;
     const uint16_t block = (uint16_t)(NUM_EXPS / n);
@@ -342,9 +346,7 @@ const char *find_guess(const State &state)
 
                     State next = state;
                     next.apply(result, guess);
-                    next.valid_answers();
-
-                    score += (float)(state.answers.size() - next.answers.size());
+                    score += (float)(state.answers.size() - next.num_answers());
                 }
 
                 if (score > best_score[id])
