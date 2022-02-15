@@ -302,7 +302,7 @@ void evaluate()
 {
     float avg = 0;
     Results result[L];
-    uint16_t totals[6] = {};
+    uint16_t totals[7] = {};
 
     for (uint16_t i = 0; i < N_VALID; ++i)
     {
@@ -322,8 +322,8 @@ void evaluate()
             state.valid_answers();
         }
 
-        totals[j - 1]++;
         j += r;
+        totals[j - 1]++;
 
         if (not r)
             std::cout << j << std::endl;
@@ -336,7 +336,7 @@ void evaluate()
         std::iota(ANSWERS.begin(), ANSWERS.end(), 0);
     }
 
-    for (uint8_t i = 0; i < 6; ++i)
+    for (uint8_t i = 0; i < 7; ++i)
         std::cout << totals[i] << " ";
     std::cout << "Avg: " << avg / N_VALID << std::endl;
 }
