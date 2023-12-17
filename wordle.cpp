@@ -8,6 +8,7 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+#include <array>
 
 // color codes
 #define BLK "\e[0;30m"
@@ -261,31 +262,33 @@ const char *find_guess(const State &state)
     std::thread threads[N_THREADS];
 
     for (uint8_t id = 0; id < N_THREADS; ++id)
-        threads[id] = std::thread([&, id]() {
-            Results result[L];
-            const uint16_t start = (uint16_t)(BLOCK * id);
-            const uint16_t end =
-                (uint16_t)(start + BLOCK + ((id == N_THREADS - 1) ? N_WORDS % N_THREADS : 0));
-            for (uint16_t i = start; i < end; ++i)
+        threads[id] = std::thread(
+            [&, id]()
             {
-                Guess score = {0, 0, U32MAX, i};
-                const char *guess = get_word(i);
-                for (const auto &answer : ANSWERS)
+                Results result[L];
+                const uint16_t start = (uint16_t)(BLOCK * id);
+                const uint16_t end =
+                    (uint16_t)(start + BLOCK + ((id == N_THREADS - 1) ? N_WORDS % N_THREADS : 0));
+                for (uint16_t i = start; i < end; ++i)
                 {
-                    play(result, guess, get_valid_word(answer));
+                    Guess score = {0, 0, U32MAX, i};
+                    const char *guess = get_word(i);
+                    for (const auto &answer : ANSWERS)
+                    {
+                        play(result, guess, get_valid_word(answer));
 
-                    State next = state;
-                    next.apply(result, guess);
-                    score.add_score(next.num_answers());
+                        State next = state;
+                        next.apply(result, guess);
+                        score.add_score(next.num_answers());
 
-                    if (score.max > guesses[id].max)
-                        break;
+                        if (score.max > guesses[id].max)
+                            break;
+                    }
+
+                    if (score < guesses[id])
+                        guesses[id] = score;
                 }
-
-                if (score < guesses[id])
-                    guesses[id] = score;
-            }
-        });
+            });
 
     for (auto &thread : threads)
         thread.join();

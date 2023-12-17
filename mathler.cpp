@@ -6,6 +6,7 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+#include <array>
 
 // color codes
 #define BLK "\e[0;30m"
@@ -327,12 +328,13 @@ const char *find_guess(const State &state)
     const uint8_t n = (NUM_EXPS > N_THREADS) ? N_THREADS : 1;
     const uint16_t block = (uint16_t)(NUM_EXPS / n);
 
-    float best_score[n] = {};
+    float best_score[n];
     uint16_t best_word[n];
 
     std::thread threads[n];
     for (uint8_t id = 0; id < n; ++id)
         threads[id] = std::thread([&, id]() {
+            best_score[id] = 0;
             const uint16_t start = (uint16_t)(block * id);
             const uint16_t end = (uint16_t)(start + block + ((id == n - 1) ? NUM_EXPS % n : 0));
             for (uint16_t i = start; i < end; ++i)
